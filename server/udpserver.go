@@ -4,7 +4,6 @@ import (
 	"log"
 	"github.com/UltraTLS/UltraTLS/api"
 	"github.com/UltraTLS/UltraTLS/internal/netutil"
-	"net"
 )
 
 // UDPServerConfig 配置
