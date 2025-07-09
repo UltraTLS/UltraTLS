@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"log"
-	"myproxy/api"
-	"myproxy/client"
-	"myproxy/server"
+	"github.com/UltraTLS/UltraTLS/api"
+	"github.com/UltraTLS/UltraTLS/client"
+	"github.com/UltraTLS/UltraTLS/server"
 	"time"
 )
 
