@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	v2mux "github.com/v2fly/v2ray-core/v5/common/mux"
 	v2buf "github.com/v2fly/v2ray-core/v5/common/buf"
@@ -12,9 +13,11 @@ import (
 )
 
 // Stream 代表一个独立的子连接（无论TCP还是UDP）
+// 现在实现 net.Conn 接口
 type Stream interface {
 	io.ReadWriteCloser
 	StreamID() uint32
+	net.Conn
 }
 
 type v2Stream struct {
@@ -79,4 +82,41 @@ func (s *v2Stream) Close() error {
 
 func (s *v2Stream) StreamID() uint32 {
 	return uint32(s.session.ID)
+}
+
+// === 实现 net.Conn 接口 ===
+
+func (s *v2Stream) LocalAddr() net.Addr {
+	if s.conn != nil {
+		return s.conn.LocalAddr()
+	}
+	return nil
+}
+
+func (s *v2Stream) RemoteAddr() net.Addr {
+	if s.conn != nil {
+		return s.conn.RemoteAddr()
+	}
+	return nil
+}
+
+func (s *v2Stream) SetDeadline(t time.Time) error {
+	if s.conn != nil {
+		return s.conn.SetDeadline(t)
+	}
+	return nil
+}
+
+func (s *v2Stream) SetReadDeadline(t time.Time) error {
+	if s.conn != nil {
+		return s.conn.SetReadDeadline(t)
+	}
+	return nil
+}
+
+func (s *v2Stream) SetWriteDeadline(t time.Time) error {
+	if s.conn != nil {
+		return s.conn.SetWriteDeadline(t)
+	}
+	return nil
 }
