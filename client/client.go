@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/UltraTLS/UltraTLS/config"
@@ -29,6 +28,7 @@ func StartClient(cfg *ClientConfig) error {
 	var (
 		serverAddr string
 		destAddr   v2net.Address
+		destPort   v2net.Port
 	)
 	// 判断是否为域名
 	if ip := net.ParseIP(conf.ServerIP); ip != nil {
@@ -38,6 +38,7 @@ func StartClient(cfg *ClientConfig) error {
 		serverAddr = fmt.Sprintf("%s:%d", conf.ServerIP, conf.ServerPort)
 		destAddr = v2net.DomainAddress(conf.ServerIP)
 	}
+	destPort = v2net.Port(conf.ServerPort)
 	log.Printf("client: will connect to server at %s", serverAddr)
 
 	inbound := protocol.NewTCPInbound(cfg.LocalListen)
@@ -54,12 +55,12 @@ func StartClient(cfg *ClientConfig) error {
 			time.Sleep(time.Second)
 			continue
 		}
-		go handleConnection(conn, serverAddr, destAddr, conf.ServerPort, cfg.Handler)
+		go handleConnection(conn, serverAddr, destAddr, destPort, cfg.Handler)
 	}
 }
 
 // handleConnection 处理单个连接
-func handleConnection(clientConn net.Conn, serverAddr string, destAddr v2net.Address, destPort int, handler func(protocol.Stream)) {
+func handleConnection(clientConn net.Conn, serverAddr string, destAddr v2net.Address, destPort v2net.Port, handler func(protocol.Stream)) {
 	defer clientConn.Close()
 
 	// === 2. 建立到server的主连接 ===
@@ -77,7 +78,7 @@ func handleConnection(clientConn net.Conn, serverAddr string, destAddr v2net.Add
 	defer session.Close()
 
 	// === 4. 开一个mux子流，目标是server配置 ===
-	dest := v2net.TCPDestination(destAddr, uint32(destPort))
+	dest := v2net.TCPDestination(destAddr, destPort)
 	stream, err := session.OpenStream(dest)
 	if err != nil {
 		log.Printf("client open mux stream error: %v", err)
