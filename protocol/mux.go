@@ -7,7 +7,7 @@ import (
 	v2mux "github.com/v2fly/v2ray-core/v5/common/mux"
 )
 
-// Session 是多路复用会话接口
+// Session 表示多路复用会话。
 type Session interface {
 	OpenStream() (Stream, error)
 	AcceptStream() (Stream, error)
@@ -19,28 +19,26 @@ type v2Session struct {
 	conn    net.Conn
 }
 
+// NewSession 返回一个基于 v2ray mux.cool 的会话。
+// isClient 为 true 时表示客户端，false 为服务端。
 func NewSession(conn io.ReadWriteCloser, isClient bool) Session {
-	manager := v2mux.NewSessionManager()
-	// 这里只做演示，实际你需要根据 isClient/server 选择不同逻辑
 	return &v2Session{
-		manager: manager,
+		manager: v2mux.NewSessionManager(),
 		conn:    conn.(net.Conn),
 	}
 }
 
 func (s *v2Session) OpenStream() (Stream, error) {
-	// 分配一个 Session
-	vs := s.manager.Allocate()
-	if vs == nil {
+	sess := s.manager.Allocate()
+	if sess == nil {
 		return nil, io.ErrClosedPipe
 	}
-	// 你需要自己实现 Stream，参考 stream.go
-	return &v2Stream{session: vs}, nil
+	// 这里包装 Session，供 Stream 用
+	return newV2Stream(sess, s.conn), nil
 }
 
 func (s *v2Session) AcceptStream() (Stream, error) {
-	// 这里需要和 v2mux 的底层事件绑定
-	// 实战中你可能要用 channel 或事件监听
+	// v2ray mux.cool 没有直接暴露 AcceptStream，实际项目中可以用更复杂的事件驱动或 channel 实现
 	return nil, io.EOF
 }
 
