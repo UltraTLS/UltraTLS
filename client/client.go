@@ -1,56 +1,54 @@
 package client
 
 import (
-	"io"
-	"log"
-	"github.com/UltraTLS/UltraTLS/api"
-	"github.com/UltraTLS/UltraTLS/internal/netutil"
 	"github.com/UltraTLS/UltraTLS/protocol"
+	"log"
 	"time"
+	"github.com/v2fly/v2ray-core/v5/common/net"
 )
 
-// ClientConfig 配置
+// ClientConfig
 type ClientConfig struct {
-	RemoteAddr string
-	Timeout    time.Duration
-	Handler    api.Handler
+	ServerAddress string            // 远程服务器主连接地址
+	LocalListen   string            // 本地监听
+	Handler       func(stream protocol.Stream)
 }
 
-// StartClient 启动TCP客户端
 func StartClient(cfg *ClientConfig) error {
-	conn, err := netutil.DialTCP(cfg.RemoteAddr, cfg.Timeout)
-	if err != nil {
+	inbound := protocol.NewTCPInbound(cfg.LocalListen)
+	if err := inbound.Listen(); err != nil {
 		return err
 	}
-	defer conn.Close()
-
-	session := protocol.NewSession(conn, true)
-	if session == nil {
-		return io.ErrUnexpectedEOF
-	}
-	stream, err := session.OpenStream()
-	if err != nil {
-		return err
-	}
-	defer stream.Close()
-	if cfg.Handler != nil {
-		cfg.Handler.OnConnect(conn)
-	}
-	buf := make([]byte, 4096)
+	defer inbound.Close()
 	for {
-		n, err := stream.Read(buf)
+		conn, err := inbound.Accept()
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("client: read error: %v", err)
+			log.Printf("client accept error: %v", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		go func(clientConn net.Conn) {
+			// 建立主连接到服务端
+			outbound := protocol.NewTCPOutbound(time.Second * 10)
+			serverConn, err := outbound.Connect("tcp", cfg.ServerAddress)
+			if err != nil {
+				log.Printf("client connect to server error: %v", err)
+				clientConn.Close()
+				return
 			}
-			break
-		}
-		if cfg.Handler != nil {
-			cfg.Handler.OnData(conn, buf[:n])
-		}
+			defer outbound.Close()
+			// 建立mux session
+			session := protocol.NewSession(serverConn)
+			defer session.Close()
+			// 为每个本地连接开一个mux子流
+			stream, err := session.OpenStream(net.TCPDestination("127.0.0.1", 0)) // 可自定义目标
+			if err != nil {
+				log.Printf("client open mux stream error: %v", err)
+				clientConn.Close()
+				return
+			}
+			defer stream.Close()
+			cfg.Handler(stream)
+		}(conn)
 	}
-	if cfg.Handler != nil {
-		cfg.Handler.OnClose(conn)
-	}
-	return nil
 }
