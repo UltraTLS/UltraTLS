@@ -2,8 +2,8 @@ package server
 
 import (
 	"log"
-	"myproxy/api"
-	"myproxy/internal/netutil"
+	"github.com/UltraTLS/UltraTLS/api"
+	"github.com/UltraTLS/UltraTLS/internal/netutil"
 	"net"
 )
 
