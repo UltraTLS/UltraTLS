@@ -3,54 +3,68 @@ package client
 import (
 	"io"
 	"log"
-	"github.com/UltraTLS/UltraTLS/api"
-	"github.com/UltraTLS/UltraTLS/internal/netutil"
-	"github.com/UltraTLS/UltraTLS/protocol"
+	"net"
 	"time"
+
+	"github.com/UltraTLS/UltraTLS/protocol"
+	v2net "github.com/v2fly/v2ray-core/v5/common/net"
 )
 
-// ClientConfig 配置
+// ClientConfig 配置结构
 type ClientConfig struct {
-	RemoteAddr string
-	Timeout    time.Duration
-	Handler    api.Handler
+	ServerAddress string               // 远程服务器主连接地址
+	LocalListen   string               // 本地监听地址
+	Handler       func(stream protocol.Stream)
 }
 
-// StartClient 启动TCP客户端
+// StartClient 启动客户端
 func StartClient(cfg *ClientConfig) error {
-	conn, err := netutil.DialTCP(cfg.RemoteAddr, cfg.Timeout)
-	if err != nil {
+	inbound := protocol.NewTCPInbound(cfg.LocalListen)
+	if err := inbound.Listen(); err != nil {
 		return err
 	}
-	defer conn.Close()
-
-	session := protocol.NewSession(conn, true)
-	if session == nil {
-		return io.ErrUnexpectedEOF
-	}
-	stream, err := session.OpenStream()
-	if err != nil {
-		return err
-	}
-	defer stream.Close()
-	if cfg.Handler != nil {
-		cfg.Handler.OnConnect(conn)
-	}
-	buf := make([]byte, 4096)
+	defer inbound.Close()
+	log.Printf("client: listening on %s", cfg.LocalListen)
 	for {
-		n, err := stream.Read(buf)
+		conn, err := inbound.Accept()
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("client: read error: %v", err)
+			log.Printf("client accept error: %v", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		go func(clientConn net.Conn) {
+			defer clientConn.Close()
+			// 与服务器建立主连接
+			outbound := protocol.NewTCPOutbound(10 * time.Second)
+			serverConn, err := outbound.Connect("tcp", cfg.ServerAddress)
+			if err != nil {
+				log.Printf("client connect to server error: %v", err)
+				return
 			}
-			break
-		}
-		if cfg.Handler != nil {
-			cfg.Handler.OnData(conn, buf[:n])
-		}
+			defer outbound.Close()
+			defer serverConn.Close()
+
+			// 建立mux session
+			session := protocol.NewSession(serverConn)
+			defer session.Close()
+
+			// 为每个本地连接开一个mux子流
+			dest := v2net.TCPDestination(v2net.IPAddress(net.ParseIP("127.0.0.1")), 0)
+			stream, err := session.OpenStream(dest)
+			if err != nil {
+				log.Printf("client open mux stream error: %v", err)
+				return
+			}
+			defer stream.Close()
+
+			// 业务处理
+			if cfg.Handler != nil {
+				cfg.Handler(stream)
+			} else {
+				// 默认双向转发
+				go func() { _, _ = io.Copy(stream, clientConn) }()
+				_, _ = io.Copy(clientConn, stream)
+			}
+		}(conn)
 	}
-	if cfg.Handler != nil {
-		cfg.Handler.OnClose(conn)
-	}
-	return nil
 }

@@ -4,46 +4,43 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
-	v2buf "github.com/v2fly/v2ray-core/v5/common/buf"
 	v2mux "github.com/v2fly/v2ray-core/v5/common/mux"
+	v2buf "github.com/v2fly/v2ray-core/v5/common/buf"
 	v2net "github.com/v2fly/v2ray-core/v5/common/net"
+	"github.com/v2fly/v2ray-core/v5/common/protocol"
 )
 
-// Stream is a multiplexed stream implemented using v2ray mux.cool.
+// Stream 代表一个独立的子连接（无论TCP还是UDP）
+// 现在实现 net.Conn 接口
 type Stream interface {
 	io.ReadWriteCloser
 	StreamID() uint32
+	net.Conn
 }
 
 type v2Stream struct {
-	conn    net.Conn
-	session *v2mux.Session
-	closed  bool
-	rLock   sync.Mutex
-	wLock   sync.Mutex
+	conn         net.Conn
+	session      *v2mux.Session
+	dest         v2net.Destination
+	closed       bool
+	rLock, wLock sync.Mutex
 }
 
-func newV2Stream(conn net.Conn, session *v2mux.Session) *v2Stream {
-	return &v2Stream{
-		conn:    conn,
-		session: session,
-	}
+func newV2Stream(conn net.Conn, session *v2mux.Session, dest v2net.Destination) *v2Stream {
+	return &v2Stream{conn: conn, session: session, dest: dest}
 }
 
-// Read reads data from the stream.
 func (s *v2Stream) Read(p []byte) (int, error) {
 	s.rLock.Lock()
 	defer s.rLock.Unlock()
 	if s.closed {
 		return 0, io.EOF
 	}
-	// Create a new buffered reader from the connection.
 	reader := v2buf.NewReader(s.conn)
-	// v2mux.Session.NewReader expects a *v2buf.BufferedReader.
 	br, ok := reader.(*v2buf.BufferedReader)
 	if !ok {
-		// Should not happen as NewReader returns *BufferedReader.
 		return 0, io.ErrUnexpectedEOF
 	}
 	bufReader := s.session.NewReader(br)
@@ -59,7 +56,6 @@ func (s *v2Stream) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// Write writes data to the stream.
 func (s *v2Stream) Write(p []byte) (int, error) {
 	s.wLock.Lock()
 	defer s.wLock.Unlock()
@@ -72,24 +68,55 @@ func (s *v2Stream) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	mb := v2buf.MultiBuffer{b}
-	// For v2mux.NewWriter, we need to provide a Destination.
-	// Since we don't have a meaningful destination here, we use a dummy TCP destination.
-	// Convert "0.0.0.0" to an Address using v2net.IPAddress.
-	dummyDest := v2net.TCPDestination(v2net.IPAddress(net.ParseIP("0.0.0.0")), 0)
-	writer := v2mux.NewWriter(s.session.ID, dummyDest, v2buf.NewWriter(s.conn), 0)
+	writer := v2mux.NewWriter(s.session.ID, s.dest, v2buf.NewWriter(s.conn), protocol.TransferTypeStream)
 	if err := writer.WriteMultiBuffer(mb); err != nil {
 		return 0, err
 	}
 	return len(p), nil
 }
 
-// Close closes the stream.
 func (s *v2Stream) Close() error {
 	s.closed = true
 	return s.session.Close()
 }
 
-// StreamID returns the ID of the stream.
 func (s *v2Stream) StreamID() uint32 {
 	return uint32(s.session.ID)
+}
+
+// === 实现 net.Conn 接口 ===
+
+func (s *v2Stream) LocalAddr() net.Addr {
+	if s.conn != nil {
+		return s.conn.LocalAddr()
+	}
+	return nil
+}
+
+func (s *v2Stream) RemoteAddr() net.Addr {
+	if s.conn != nil {
+		return s.conn.RemoteAddr()
+	}
+	return nil
+}
+
+func (s *v2Stream) SetDeadline(t time.Time) error {
+	if s.conn != nil {
+		return s.conn.SetDeadline(t)
+	}
+	return nil
+}
+
+func (s *v2Stream) SetReadDeadline(t time.Time) error {
+	if s.conn != nil {
+		return s.conn.SetReadDeadline(t)
+	}
+	return nil
+}
+
+func (s *v2Stream) SetWriteDeadline(t time.Time) error {
+	if s.conn != nil {
+		return s.conn.SetWriteDeadline(t)
+	}
+	return nil
 }
