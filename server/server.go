@@ -1,74 +1,44 @@
 package server
 
 import (
-	"io"
-	"log"
-	"github.com/UltraTLS/UltraTLS/api"
-	"github.com/UltraTLS/UltraTLS/internal/netutil"
 	"github.com/UltraTLS/UltraTLS/protocol"
-	"net"
+	"log"
+	"time"
+	"github.com/v2fly/v2ray-core/v5/common/net"
 )
 
-// ServerConfig 配置
+// ServerConfig
 type ServerConfig struct {
 	ListenAddr string
-	Handler    api.Handler
+	Handler    func(stream protocol.Stream)
 }
 
-// StartServer 启动TCP服务端
 func StartServer(cfg *ServerConfig) error {
-	ln, err := netutil.ListenTCP(cfg.ListenAddr)
-	if err != nil {
+	inbound := protocol.NewTCPInbound(cfg.ListenAddr)
+	if err := inbound.Listen(); err != nil {
 		return err
 	}
-	defer ln.Close()
-	log.Printf("server: listening on %s", cfg.ListenAddr)
+	defer inbound.Close()
 	for {
-		conn, err := ln.Accept()
+		conn, err := inbound.Accept()
 		if err != nil {
-			log.Printf("server: accept error: %v", err)
+			log.Printf("server accept error: %v", err)
+			time.Sleep(time.Second)
 			continue
 		}
-		go handleConn(conn, cfg.Handler)
-	}
-}
-
-func handleConn(conn net.Conn, handler api.Handler) {
-	defer conn.Close()
-	session := protocol.NewSession(conn, false)
-	if session == nil {
-		log.Printf("server: failed to create session")
-		return
-	}
-	for {
-		stream, err := session.AcceptStream()
-		if err != nil {
-			log.Printf("server: accept stream error: %v", err)
-			return
-		}
-		go handleStream(stream, handler, conn)
-	}
-}
-
-func handleStream(stream protocol.Stream, handler api.Handler, conn net.Conn) {
-	defer stream.Close()
-	if handler != nil {
-		handler.OnConnect(conn)
-	}
-	buf := make([]byte, 4096)
-	for {
-		n, err := stream.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("server: stream read error: %v", err)
+		go func(serverConn net.Conn) {
+			// 建立mux session
+			session := protocol.NewSession(serverConn)
+			defer session.Close()
+			// 持续接受子流
+			for {
+				stream, _, err := session.AcceptStream()
+				if err != nil {
+					log.Printf("server accept mux stream error: %v", err)
+					break
+				}
+				go cfg.Handler(stream)
 			}
-			break
-		}
-		if handler != nil {
-			handler.OnData(conn, buf[:n])
-		}
-	}
-	if handler != nil {
-		handler.OnClose(conn)
+		}(conn)
 	}
 }
