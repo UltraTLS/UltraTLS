@@ -3,9 +3,9 @@ package client
 import (
 	"io"
 	"log"
-	"myproxy/api"
-	"myproxy/internal/netutil"
-	"myproxy/protocol"
+	"github.com/UltraTLS/UltraTLS/api"
+	"github.com/UltraTLS/UltraTLS/internal/netutil"
+	"github.com/UltraTLS/UltraTLS/protocol"
 	"time"
 )
 
