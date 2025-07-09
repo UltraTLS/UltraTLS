@@ -1,10 +1,10 @@
 package client
 
 import (
+	"io"
 	"log"
 	"net"
 	"time"
-	"io"
 
 	"github.com/UltraTLS/UltraTLS/protocol"
 	v2net "github.com/v2fly/v2ray-core/v5/common/net"
@@ -62,14 +62,9 @@ func StartClient(cfg *ClientConfig) error {
 				cfg.Handler(stream)
 			} else {
 				// 默认双向转发
-				go func() { _, _ = ioCopy(stream, clientConn) }()
-				_, _ = ioCopy(clientConn, stream)
+				go func() { _, _ = io.Copy(stream, clientConn) }()
+				_, _ = io.Copy(clientConn, stream)
 			}
 		}(conn)
 	}
-}
-
-// ioCopy 封装io.Copy，简化错误处理
-func ioCopy(dst net.Conn, src net.Conn) (written int64, err error) {
-	return io.Copy(dst, src)
 }
