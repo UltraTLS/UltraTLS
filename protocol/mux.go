@@ -6,9 +6,7 @@ import (
 	"sync"
 
 	v2mux "github.com/v2fly/v2ray-core/v5/common/mux"
-	v2buf "github.com/v2fly/v2ray-core/v5/common/buf"
 	v2net "github.com/v2fly/v2ray-core/v5/common/net"
-	"github.com/v2fly/v2ray-core/v5/common/protocol"
 )
 
 // Session 表示一个 mux.cool 多路复用session（主连接）
