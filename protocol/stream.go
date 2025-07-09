@@ -10,7 +10,7 @@ import (
 	v2net "github.com/v2fly/v2ray-core/v5/common/net"
 )
 
-// Stream 是一个多路复用流，用 v2ray mux.cool 实现。
+// Stream is a multiplexed stream implemented using v2ray mux.cool.
 type Stream interface {
 	io.ReadWriteCloser
 	StreamID() uint32
@@ -31,17 +31,22 @@ func newV2Stream(conn net.Conn, session *v2mux.Session) *v2Stream {
 	}
 }
 
-// Read 从流中读取数据。
+// Read reads data from the stream.
 func (s *v2Stream) Read(p []byte) (int, error) {
 	s.rLock.Lock()
 	defer s.rLock.Unlock()
 	if s.closed {
 		return 0, io.EOF
 	}
-	// Directly use v2buf.NewReader as NewBufferedReader is not available.
+	// Create a new buffered reader from the connection.
 	reader := v2buf.NewReader(s.conn)
-	// s.session.NewReader takes a *v2buf.BufferedReader; NewReader already returns one.
-	bufReader := s.session.NewReader(reader)
+	// v2mux.Session.NewReader expects a *v2buf.BufferedReader.
+	br, ok := reader.(*v2buf.BufferedReader)
+	if !ok {
+		// Should not happen as NewReader returns *BufferedReader.
+		return 0, io.ErrUnexpectedEOF
+	}
+	bufReader := s.session.NewReader(br)
 	mb, err := bufReader.ReadMultiBuffer()
 	if err != nil {
 		return 0, err
@@ -54,7 +59,7 @@ func (s *v2Stream) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// Write 向流中写入数据。
+// Write writes data to the stream.
 func (s *v2Stream) Write(p []byte) (int, error) {
 	s.wLock.Lock()
 	defer s.wLock.Unlock()
@@ -67,22 +72,24 @@ func (s *v2Stream) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	mb := v2buf.MultiBuffer{b}
-	// Use a dummy TCP destination since v2mux.TCPDestination is unexported.
-	// v2net.TCPDestination creates a net.Destination for TCP.
-	writer := v2mux.NewWriter(s.session.ID, v2net.TCPDestination("0.0.0.0", 0), v2buf.NewWriter(s.conn), 0)
+	// For v2mux.NewWriter, we need to provide a Destination.
+	// Since we don't have a meaningful destination here, we use a dummy TCP destination.
+	// Convert "0.0.0.0" to an Address using v2net.IPAddress.
+	dummyDest := v2net.TCPDestination(v2net.IPAddress(net.ParseIP("0.0.0.0")), 0)
+	writer := v2mux.NewWriter(s.session.ID, dummyDest, v2buf.NewWriter(s.conn), 0)
 	if err := writer.WriteMultiBuffer(mb); err != nil {
 		return 0, err
 	}
 	return len(p), nil
 }
 
-// Close 关闭该流。
+// Close closes the stream.
 func (s *v2Stream) Close() error {
 	s.closed = true
 	return s.session.Close()
 }
 
-// StreamID 返回流 ID。
+// StreamID returns the ID of the stream.
 func (s *v2Stream) StreamID() uint32 {
 	return uint32(s.session.ID)
 }
