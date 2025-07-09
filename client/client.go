@@ -1,25 +1,30 @@
 package client
 
 import (
-	"github.com/UltraTLS/UltraTLS/protocol"
 	"log"
+	"net"
 	"time"
-	"github.com/v2fly/v2ray-core/v5/common/net"
+	"io"
+
+	"github.com/UltraTLS/UltraTLS/protocol"
+	v2net "github.com/v2fly/v2ray-core/v5/common/net"
 )
 
-// ClientConfig
+// ClientConfig 配置结构
 type ClientConfig struct {
-	ServerAddress string            // 远程服务器主连接地址
-	LocalListen   string            // 本地监听
+	ServerAddress string               // 远程服务器主连接地址
+	LocalListen   string               // 本地监听地址
 	Handler       func(stream protocol.Stream)
 }
 
+// StartClient 启动客户端
 func StartClient(cfg *ClientConfig) error {
 	inbound := protocol.NewTCPInbound(cfg.LocalListen)
 	if err := inbound.Listen(); err != nil {
 		return err
 	}
 	defer inbound.Close()
+	log.Printf("client: listening on %s", cfg.LocalListen)
 	for {
 		conn, err := inbound.Accept()
 		if err != nil {
@@ -28,27 +33,43 @@ func StartClient(cfg *ClientConfig) error {
 			continue
 		}
 		go func(clientConn net.Conn) {
-			// 建立主连接到服务端
-			outbound := protocol.NewTCPOutbound(time.Second * 10)
+			defer clientConn.Close()
+			// 与服务器建立主连接
+			outbound := protocol.NewTCPOutbound(10 * time.Second)
 			serverConn, err := outbound.Connect("tcp", cfg.ServerAddress)
 			if err != nil {
 				log.Printf("client connect to server error: %v", err)
-				clientConn.Close()
 				return
 			}
 			defer outbound.Close()
+			defer serverConn.Close()
+
 			// 建立mux session
 			session := protocol.NewSession(serverConn)
 			defer session.Close()
+
 			// 为每个本地连接开一个mux子流
-			stream, err := session.OpenStream(net.TCPDestination("127.0.0.1", 0)) // 可自定义目标
+			dest := v2net.TCPDestination(v2net.IPAddress(net.ParseIP("127.0.0.1")), 0)
+			stream, err := session.OpenStream(dest)
 			if err != nil {
 				log.Printf("client open mux stream error: %v", err)
-				clientConn.Close()
 				return
 			}
 			defer stream.Close()
-			cfg.Handler(stream)
+
+			// 业务处理
+			if cfg.Handler != nil {
+				cfg.Handler(stream)
+			} else {
+				// 默认双向转发
+				go func() { _, _ = ioCopy(stream, clientConn) }()
+				_, _ = ioCopy(clientConn, stream)
+			}
 		}(conn)
 	}
+}
+
+// ioCopy 封装io.Copy，简化错误处理
+func ioCopy(dst net.Conn, src net.Conn) (written int64, err error) {
+	return io.Copy(dst, src)
 }
